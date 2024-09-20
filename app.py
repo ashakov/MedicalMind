@@ -199,6 +199,7 @@ def process_report(uploaded_file):
 
         st.success("Все операции успешно выполнены!")
 
+
     except Exception as e:
         st.error(f"Произошла ошибка при обработке отчета: {e}")
         st.text(traceback.format_exc())

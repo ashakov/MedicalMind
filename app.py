@@ -1,4 +1,5 @@
 # app.py
+
 import os
 import streamlit as st
 import pandas as pd
@@ -9,24 +10,35 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 import requests
-
 from google.auth.transport.requests import Request
 import traceback
+import json
 
 # Настройка аутентификации с Google API
-SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
-SERVICE_ACCOUNT_FILE = 'service_account.json'  # Укажите правильный путь
+SCOPES = [
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/spreadsheets'
+]
 
-@st.cache_resource
 def get_google_credentials():
-    credentials = Credentials.from_service_account_file(
-        SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-    credentials.refresh(Request())  # Обновление токена доступа
-    return credentials
+    try:
+        service_account_info = json.loads(st.secrets["SERVICE_ACCOUNT_JSON"])
+        credentials = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
+        credentials.refresh(Request())  # Обновление токена доступа
+        return credentials
+    except Exception as e:
+        st.error(f"Ошибка при загрузке креденциалов: {e}")
+        st.text(traceback.format_exc())
+        return None
 
 def get_gspread_client(credentials):
-    gc = gspread.authorize(credentials)
-    return gc
+    try:
+        gc = gspread.authorize(credentials)
+        return gc
+    except Exception as e:
+        st.error(f"Ошибка при авторизации gspread: {e}")
+        st.text(traceback.format_exc())
+        return None
 
 def export_sheet_to_pdf(spreadsheet_id, gid, save_path, credentials):
     try:
@@ -132,15 +144,31 @@ def process_report(uploaded_file):
 
         # Сброс индекса и переименование столбцов
         result_df = combined_df.reset_index(drop=True)
-        result_df.columns = ['Измеряемый параметр', 'Диапазон нормальных значений', 'Результат',
-                             'Интерпретация результата', 'ФИО клиента', 'Возраст', 'Телосложение', 'Время тестирования']
+        result_df.columns = [
+            'Измеряемый параметр',
+            'Диапазон нормальных значений',
+            'Результат',
+            'Интерпретация результата',
+            'ФИО клиента',
+            'Возраст',
+            'Телосложение',
+            'Время тестирования'
+        ]
         result_df = result_df[1:]
         st.info("Переименованы столбцы и удалена первая строка.")
 
         # Доступ к Google Sheets
-        spreadsheet_url = 'https://docs.google.com/spreadsheets/d/1-ox9vCOf59cmfcjB0agpHsj-Tn2P9jNpIIoIXxnQSlQ'
+        spreadsheet_url = st.secrets["SPREADSHEET_URL"]
         credentials = get_google_credentials()
+        if not credentials:
+            st.error("Креденциалы не получены.")
+            return
+
         gc = get_gspread_client(credentials)
+        if not gc:
+            st.error("Клиент gspread не инициализирован.")
+            return
+
         spreadsheet = gc.open_by_url(spreadsheet_url)
         st.info("Подключение к Google Sheets выполнено.")
 
@@ -162,7 +190,7 @@ def process_report(uploaded_file):
         export_sheet_to_pdf(spreadsheet.id, '0', pdf_filename, credentials)
 
         # Загрузка PDF на Google Диск
-        drive_folder_id = '1tYxHdnlvfsuNEsGrBg0wEnmBEP7RTHpG'  # Замените на реальный ID папки
+        drive_folder_id = st.secrets["DRIVE_FOLDER_ID"]
         upload_to_google_drive(pdf_filename, drive_folder_id, credentials)
 
         st.success("Все операции успешно выполнены!")
@@ -172,6 +200,13 @@ def process_report(uploaded_file):
         st.text(traceback.format_exc())
 
 def main():
+    # Добавление логотипа
+    logo_path = os.path.join('assets', 'logo.png')  # Убедитесь, что путь корректен
+    if os.path.exists(logo_path):
+        st.image(logo_path, width=200)  # Вы можете изменить ширину по вашему усмотрению
+    else:
+        st.warning("Логотип не найден. Пожалуйста, проверьте путь к файлу.")
+
     st.title("Обработка Медицинских Отчётов")
 
     st.write("""

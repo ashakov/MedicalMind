@@ -1,0 +1,5 @@
+{
+  "template": "default",
+  "strip_sources": true,
+  "static_path": "static"
+}

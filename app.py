@@ -14,7 +14,7 @@ from google.auth.transport.requests import Request
 import traceback
 import json
 
-# Настройка аутентификации с Google API
+# Настройка аутентификации с Google API 1
 SCOPES = [
     'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/spreadsheets'

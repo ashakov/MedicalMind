@@ -14,7 +14,7 @@ from google.auth.transport.requests import Request
 import traceback
 import json
 
-# Настройка аутентификации с Google API 1
+# Настройка аутентификации с Google API
 SCOPES = [
     'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/spreadsheets'
@@ -26,6 +26,10 @@ def get_google_credentials():
         credentials = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
         credentials.refresh(Request())  # Обновление токена доступа
         return credentials
+    except json.JSONDecodeError as e:
+        st.error(f"Ошибка декодирования JSON: {e}")
+        st.text(traceback.format_exc())
+        return None
     except Exception as e:
         st.error(f"Ошибка при загрузке креденциалов: {e}")
         st.text(traceback.format_exc())

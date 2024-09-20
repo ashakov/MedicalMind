@@ -19,5 +19,6 @@ env/
 # Default ignored files
 /shelf/
 /workspace.xml
+
 # Streamlit secrets
 .streamlit/secrets.toml

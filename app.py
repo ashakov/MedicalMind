@@ -47,6 +47,7 @@ def get_google_credentials():
         return None
 
 
+
 def get_gspread_client(credentials):
     try:
         gc = gspread.authorize(credentials)

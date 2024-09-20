@@ -20,6 +20,17 @@ SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets'
 ]
 
+import json
+import streamlit as st
+from google.oauth2.service_account import Credentials
+from google.auth.transport.requests import Request
+import traceback
+
+SCOPES = [
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/spreadsheets'
+]
+
 def get_google_credentials():
     try:
         service_account_info = json.loads(st.secrets["SERVICE_ACCOUNT_JSON"])
@@ -34,6 +45,7 @@ def get_google_credentials():
         st.error(f"Ошибка при загрузке креденциалов: {e}")
         st.text(traceback.format_exc())
         return None
+
 
 def get_gspread_client(credentials):
     try:

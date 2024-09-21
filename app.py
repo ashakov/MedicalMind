@@ -1,130 +1,158 @@
-# app.py
-
-import os
 import streamlit as st
 import pandas as pd
 from bs4 import BeautifulSoup
 import gspread
 from gspread_dataframe import set_with_dataframe
+import os
+import toml  # Для чтения конфигурации TOML
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 import requests
 from google.auth.transport.requests import Request
-import traceback
-import json
+from datetime import datetime
 
-# Настройка аутентификации с Google API
-SCOPES = [
-    'https://www.googleapis.com/auth/drive',
-    'https://www.googleapis.com/auth/spreadsheets'
-]
+# =======================
+# Настройка страницы
+# =======================
 
-import json
-import streamlit as st
-from google.oauth2.service_account import Credentials
-from google.auth.transport.requests import Request
-import traceback
+# Вызов set_page_config() как первой Streamlit-команды
+st.set_page_config(
+    page_title="Загрузчик HTML в Google Sheets и Drive",
+    layout="centered",
+    initial_sidebar_state="expanded",
+)
 
-SCOPES = [
-    'https://www.googleapis.com/auth/drive',
-    'https://www.googleapis.com/auth/spreadsheets'
-]
+# =======================
+# Загрузка Конфигурации
+# =======================
 
-def get_google_credentials():
+def load_config(config_file='config.toml'):
+    """
+    Загружает конфигурацию из файла TOML.
+    """
+    if not os.path.exists(config_file):
+        raise FileNotFoundError(f"Файл конфигурации `{config_file}` не найден.")
     try:
-        service_account_info = json.loads(st.secrets["SERVICE_ACCOUNT_JSON"])
-        credentials = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
-        credentials.refresh(Request())  # Обновление токена доступа
-        return credentials
-    except json.JSONDecodeError as e:
-        st.error(f"Ошибка декодирования JSON: {e}")
-        st.text(traceback.format_exc())
-        return None
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config = toml.load(f)
+        return config
     except Exception as e:
-        st.error(f"Ошибка при загрузке креденциалов: {e}")
-        st.text(traceback.format_exc())
-        return None
+        raise ValueError(f"Не удалось загрузить файл конфигурации: {e}")
 
+def initialize_services(config):
+    """
+    Инициализирует сервисы Google Sheets и Google Drive.
+    """
+    gcp_config = config.get('gcp_service_account', {})
+    google_api_config = config.get('google_api', {})
+    scopes = [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+    ]  # Жестко закодированные scopes
 
+    # Сборка словаря с учетными данными сервисного аккаунта
+    service_account_info = {
+        "type": gcp_config.get("type"),
+        "project_id": gcp_config.get("project_id"),
+        "private_key_id": gcp_config.get("private_key_id"),
+        "private_key": gcp_config.get("private_key"),
+        "client_email": gcp_config.get("client_email"),
+        "client_id": gcp_config.get("client_id"),
+        "auth_uri": gcp_config.get("auth_uri"),
+        "token_uri": gcp_config.get("token_uri"),
+        "auth_provider_x509_cert_url": gcp_config.get("auth_provider_x509_cert_url"),
+        "client_x509_cert_url": gcp_config.get("client_x509_cert_url"),
+        "universe_domain": gcp_config.get("universe_domain")
+    }
 
-def get_gspread_client(credentials):
+    # Проверка наличия всех необходимых полей
+    required_fields = [
+        "type", "project_id", "private_key_id", "private_key",
+        "client_email", "client_id", "auth_uri", "token_uri",
+        "auth_provider_x509_cert_url", "client_x509_cert_url",
+        "universe_domain"
+    ]
+    missing_fields = [field for field in required_fields if not service_account_info.get(field)]
+    if missing_fields:
+        raise ValueError(f"Отсутствуют обязательные поля в секции `gcp_service_account`: {', '.join(missing_fields)}")
+
     try:
-        gc = gspread.authorize(credentials)
-        return gc
+        # Создание учетных данных
+        creds = Credentials.from_service_account_info(
+            service_account_info,
+            scopes=scopes
+        )
     except Exception as e:
-        st.error(f"Ошибка при авторизации gspread: {e}")
-        st.text(traceback.format_exc())
-        return None
+        raise ValueError(f"Не удалось создать учетные данные: {e}")
 
-def export_sheet_to_pdf(spreadsheet_id, gid, save_path, credentials):
     try:
-        # URL для экспорта конкретной вкладки
-        export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=pdf&gid={gid}"
-
-        headers = {
-            'Authorization': 'Bearer ' + credentials.token,
-        }
-
-        response = requests.get(export_url, headers=headers)
-
-        if response.status_code != 200:
-            raise ValueError(f"Не удалось экспортировать лист в PDF. Статус код: {response.status_code}")
-
-        with open(save_path, 'wb') as f:
-            f.write(response.content)
-        st.success("Вкладка экспортирована в PDF.")
+        # Инициализация gspread клиента
+        gc = gspread.authorize(creds)
     except Exception as e:
-        st.error(f"Ошибка при экспорте в PDF: {e}")
-        st.text(traceback.format_exc())
+        raise ConnectionError(f"Не удалось авторизоваться в gspread: {e}")
 
-def upload_to_google_drive(file_path, drive_folder_id, credentials):
     try:
-        drive_service = build('drive', 'v3', credentials=credentials)
-        file_metadata = {'name': os.path.basename(file_path)}
-        if drive_folder_id:
-            file_metadata['parents'] = [drive_folder_id]
-
-        media = MediaFileUpload(file_path, mimetype='application/pdf')
-        file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-
-        st.success(f"Файл загружен на Google Диск с ID: {file.get('id')}")
+        # Инициализация Google Sheets API
+        sheets_service = build('sheets', 'v4', credentials=creds)
     except Exception as e:
-        st.error(f"Ошибка при загрузке на Google Диск: {e}")
-        st.text(traceback.format_exc())
+        raise ConnectionError(f"Не удалось инициализировать Google Sheets API: {e}")
 
-def extract_text(soup, label):
     try:
-        element = soup.find_all('td', string=lambda x: x and label in x)[0]
-        extracted_text = element.text.split(f'{label} ')[1]
-        st.info(f"{label} извлечено: {extracted_text}")
-        return extracted_text
-    except (IndexError, AttributeError) as e:
-        st.error(f"Не удалось найти или обработать {label}: {e}")
-        st.text(traceback.format_exc())
-        return None
+        # Инициализация Google Drive API
+        drive_service = build('drive', 'v3', credentials=creds)
+    except Exception as e:
+        raise ConnectionError(f"Не удалось инициализировать Google Drive API: {e}")
 
-def process_report(uploaded_file):
+    return creds, gc, sheets_service, drive_service
+
+# =======================
+# Попытка загрузить конфигурацию и инициализировать сервисы
+# =======================
+
+try:
+    config = load_config()
+    # Для отладки (временно, уберите после проверки)
+    # st.write("Конфигурация загружена:", config)
+    creds, gc, sheets_service, drive_service = initialize_services(config)
+except Exception as e:
+    # Если возникла ошибка, отображаем её и останавливаем приложение
+    st.error(f"Ошибка при загрузке конфигурации или инициализации сервисов: {e}")
+    st.stop()
+
+# =======================
+# Streamlit App Layout
+# =======================
+
+# Отображение информации о сервисном аккаунте в боковой панели
+service_account_email = creds.service_account_email
+st.sidebar.info(f"Сервисный аккаунт: {service_account_email}")
+
+# Заголовок приложения
+st.title("Загрузка HTML Отчёта в Google Sheets и Drive")
+
+# Инструкции
+st.markdown("""
+    Загрузите HTML отчёт, и это приложение извлечёт необходимые данные и добавит их в ваш документ Google Sheets.
+    После этого, приложение экспортирует определённый лист в PDF и загрузит его на ваш Google Диск.
+""")
+
+# Загрузка файла
+uploaded_file = st.file_uploader("Выберите HTML файл", type=["html", "htm"])
+
+if uploaded_file is not None:
     try:
-        st.info("Начало обработки файла.")
-
-        content = uploaded_file.read()
-        st.info("Файл прочитан.")
-
-        soup = BeautifulSoup(content.decode('windows-1251'), 'html.parser')
-        st.info("HTML-файл распарсен.")
+        # Чтение загруженного файла
+        content = uploaded_file.read().decode('windows-1251')  # При необходимости измените кодировку
+        soup = BeautifulSoup(content, 'html.parser')
 
         # Извлечение информации о клиенте
-        client_name = extract_text(soup, 'Имя:')
-        age = extract_text(soup, 'Возраст:')
-        body = extract_text(soup, 'Телосложение:')
-        test_time = extract_text(soup, 'Время тестирования:')
+        client_name = soup.find_all('td', text=lambda x: x and 'Имя:' in x)[0].text.split('Имя: ')[1].strip()
+        age = soup.find_all('td', text=lambda x: x and 'Возраст:' in x)[0].text.split('Возраст: ')[1].strip()
+        body = soup.find_all('td', text=lambda x: x and 'Телосложение:' in x)[0].text.split('Телосложение: ')[1].strip()
+        test_time = soup.find_all('td', text=lambda x: x and 'Время тестирования:' in x)[0].text.split('Время тестирования: ')[1].strip()
 
-        if not all([client_name, age, body, test_time]):
-            st.error("Не удалось извлечь все необходимые данные.")
-            return
-
-        # Извлечение таблиц и их объединение
+        # Извлечение таблиц с 4 столбцами
         tables = []
         for table in soup.find_all('table'):
             rows = table.find_all('tr')
@@ -138,28 +166,21 @@ def process_report(uploaded_file):
                     df = pd.DataFrame(table_data)
                     tables.append(df)
 
-        st.info(f"Найдено таблиц: {len(tables)}")
-
         if not tables:
-            st.error("Не найдены подходящие таблицы в отчёте.")
-            return
+            st.error("В загруженном HTML файле не найдено подходящих таблиц.")
+            st.stop()
 
         # Объединение всех таблиц в один DataFrame
         combined_df = pd.concat(tables, ignore_index=True)
-        st.info("Таблицы объединены в один DataFrame.")
 
-        # Добавление информации о клиенте в DataFrame
+        # Добавление информации о клиенте
         combined_df['Client_Name'] = client_name
         combined_df['Возраст'] = age
         combined_df['Телосложение'] = body
         combined_df['Время тестирования'] = test_time
-        st.info("Информация о клиенте добавлена в DataFrame.")
 
-        # Установка первой строки в качестве заголовков столбцов
+        # Установка первой строки в качестве заголовков
         combined_df.columns = combined_df.iloc[0]
-        st.info("Установлены заголовки столбцов.")
-
-        # Сброс индекса и переименование столбцов
         result_df = combined_df.reset_index(drop=True)
         result_df.columns = [
             'Измеряемый параметр',
@@ -172,70 +193,134 @@ def process_report(uploaded_file):
             'Время тестирования'
         ]
         result_df = result_df[1:]
-        st.info("Переименованы столбцы и удалена первая строка.")
 
-        # Доступ к Google Sheets
-        spreadsheet_url = st.secrets["SPREADSHEET_URL"]
-        credentials = get_google_credentials()
-        if not credentials:
-            st.error("Креденциалы не получены.")
-            return
+        # Отображение DataFrame
+        st.subheader("Извлечённые Данные")
+        st.dataframe(result_df)
 
-        gc = get_gspread_client(credentials)
-        if not gc:
-            st.error("Клиент gspread не инициализирован.")
-            return
+        # Ввод URL Google Sheets
+        spreadsheet_url = st.text_input(
+            "Введите URL Google Sheets, куда хотите загрузить данные:",
+            value=config.get('google_api', {}).get('SPREADSHEET_URL', "")
+        )
 
-        spreadsheet = gc.open_by_url(spreadsheet_url)
-        st.info("Подключение к Google Sheets выполнено.")
+        # Ввод имени листа
+        worksheet_name = st.text_input(
+            "Введите имя листа в Google Sheets, куда хотите вставить данные:",
+            value="Вставка"  # Можно задать значение по умолчанию
+        )
 
-        # Выбираем лист "Вставка"
-        worksheet = spreadsheet.worksheet('Вставка')
-        st.info("Выбран лист 'Вставка'.")
+        # Ввод ID папки на Google Drive (опционально)
+        drive_folder_id = st.text_input(
+            "Введите ID папки на Google Drive, куда хотите загрузить PDF (опционально):",
+            value=config.get('google_api', {}).get('DRIVE_FOLDER_ID', "")
+        )
 
-        # Записываем DataFrame в Google Sheets
-        set_with_dataframe(worksheet, result_df)
-        st.success("Данные записаны в Google Sheets.")
+        # Кнопка для загрузки данных
+        if st.button("Загрузить в Google Sheets и Drive"):
+            try:
+                # Открытие таблицы по URL
+                spreadsheet = gc.open_by_url(spreadsheet_url)
 
-        # Определение формата названия файла
-        client_last_name, client_first_name = client_name.split()[:2]
-        order_number = 1  # Здесь можно реализовать логику увеличения номера
-        pdf_filename = f"Отчет_{client_last_name}_{client_first_name}_{order_number}.pdf"
-        st.info(f"Название PDF файла: {pdf_filename}")
+                # Выбор листа
+                try:
+                    worksheet = spreadsheet.worksheet(worksheet_name)
+                except gspread.exceptions.WorksheetNotFound:
+                    # Если лист не существует, создаём новый
+                    worksheet = spreadsheet.add_worksheet(title=worksheet_name, rows="1000", cols="20")
 
-        # Экспорт конкретной вкладки в PDF
-        export_sheet_to_pdf(spreadsheet.id, '0', pdf_filename, credentials)
+                # Запись DataFrame в Google Sheets
+                set_with_dataframe(worksheet, result_df)
 
-        # Загрузка PDF на Google Диск
-        drive_folder_id = st.secrets["DRIVE_FOLDER_ID"]
-        upload_to_google_drive(pdf_filename, drive_folder_id, credentials)
+                st.success("Данные успешно записаны в Google Sheets!")
 
-        st.success("Все операции успешно выполнены!")
+                # =======================
+                # Генерация PDF
+                # =======================
 
+                # Получение идентификатора таблицы и листа
+                spreadsheet_id = spreadsheet.url.split('/d/')[1].split('/')[0]
+                sheet = spreadsheet.worksheet(worksheet_name)
+                sheet_id = sheet.id  # Это gid
+
+                # Формирование названия файла
+                try:
+                    client_last_name, client_first_name = client_name.split()[:2]
+                except ValueError:
+                    client_last_name = client_name
+                    client_first_name = "Unknown"
+
+                # Генерация уникального номера (временная метка)
+                order_number = datetime.now().strftime("%Y%m%d%H%M%S")
+
+                pdf_filename = f"Отчет_{client_last_name}_{client_first_name}_{order_number}.pdf"
+
+                # Формирование URL для экспорта PDF
+                export_url = (
+                    f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?"
+                    f"format=pdf&"
+                    f"gid={sheet_id}&"
+                    f"size=letter&"
+                    f"portrait=true&"
+                    f"fitw=true&"
+                    f"sheetnames=false&"
+                    f"printtitle=false&"
+                    f"pagenumbers=false&"
+                    f"gridlines=false&"
+                    f"fzr=false"
+                )
+
+                # Обновление токена, если необходимо
+                if not creds.valid:
+                    creds.refresh(Request())
+
+                headers = {
+                    'Authorization': f'Bearer {creds.token}',
+                }
+
+                # Скачиваем PDF
+                response = requests.get(export_url, headers=headers)
+                if response.status_code != 200:
+                    st.error("Не удалось экспортировать лист в PDF.")
+                    st.stop()
+
+                # Сохранение PDF файла
+                with open(pdf_filename, 'wb') as f:
+                    f.write(response.content)
+
+                st.success(f"Лист успешно экспортирован в PDF: {pdf_filename}")
+
+                # =======================
+                # Загрузка PDF на Google Drive
+                # =======================
+
+                def upload_to_google_drive(file_path, folder_id=None):
+                    file_metadata = {'name': os.path.basename(file_path)}
+                    if folder_id:
+                        file_metadata['parents'] = [folder_id]
+
+                    media = MediaFileUpload(file_path, mimetype='application/pdf')
+                    file = drive_service.files().create(
+                        body=file_metadata,
+                        media_body=media,
+                        fields='id'
+                    ).execute()
+
+                    return file.get('id')
+
+                # Загрузка файла
+                if drive_folder_id.strip() == "":
+                    drive_folder_id = None  # Если поле пустое, загружаем в корень
+
+                uploaded_file_id = upload_to_google_drive(pdf_filename, drive_folder_id)
+
+                st.success(f"PDF успешно загружен на Google Диск с ID: {uploaded_file_id}")
+
+                # Удаление локального PDF файла (опционально)
+                os.remove(pdf_filename)
+
+            except Exception as e:
+                st.error(f"Произошла ошибка: {e}")
 
     except Exception as e:
-        st.error(f"Произошла ошибка при обработке отчета: {e}")
-        st.text(traceback.format_exc())
-
-def main():
-    # Добавление логотипа
-    logo_path = os.path.join('assets', 'logo.png')  # Убедитесь, что путь корректен
-    if os.path.exists(logo_path):
-        st.image(logo_path, width=200)  # Вы можете изменить ширину по вашему усмотрению
-    else:
-        st.warning("Логотип не найден. Пожалуйста, проверьте путь к файлу.")
-
-    st.title("Обработка Медицинских Отчётов")
-
-    st.write("""
-    Загрузите ваш HTML-файл отчёта, и приложение обработает его, извлечёт данные и загрузит результаты в Google Sheets и Google Drive.
-    """)
-
-    uploaded_file = st.file_uploader("Загрузите HTML файл отчёта", type=["html", "htm"])
-
-    if uploaded_file is not None:
-        if st.button("Обработать отчет"):
-            process_report(uploaded_file)
-
-if __name__ == "__main__":
-    main()
+        st.error(f"Не удалось обработать загруженный файл: {e}")

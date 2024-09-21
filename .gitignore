@@ -22,3 +22,7 @@ env/
 
 # Streamlit secrets
 .streamlit/secrets.toml
+
+config.toml
+
+service_account.json

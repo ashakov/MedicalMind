@@ -4,7 +4,6 @@ from bs4 import BeautifulSoup
 import gspread
 from gspread_dataframe import set_with_dataframe
 import os
-import toml  # Для чтения конфигурации TOML
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -24,28 +23,28 @@ st.set_page_config(
 )
 
 # =======================
-# Загрузка Конфигурации
+# Добавление Логотипа
 # =======================
 
-def load_config(config_file='config.toml'):
-    """
-    Загружает конфигурацию из файла TOML.
-    """
-    if not os.path.exists(config_file):
-        raise FileNotFoundError(f"Файл конфигурации `{config_file}` не найден.")
-    try:
-        with open(config_file, 'r', encoding='utf-8') as f:
-            config = toml.load(f)
-        return config
-    except Exception as e:
-        raise ValueError(f"Не удалось загрузить файл конфигурации: {e}")
+# Путь к файлу логотипа
+logo_path = "logo.png"  # Убедитесь, что файл logo.png находится в той же директории
 
-def initialize_services(config):
+# Проверка наличия файла логотипа
+if os.path.exists(logo_path):
+    st.image(logo_path, width=150)  # Настройте ширину по необходимости
+else:
+    st.warning("Логотип не найден. Убедитесь, что файл `logo.png` находится в директории приложения.")
+
+# =======================
+# Инициализация Сервисов
+# =======================
+
+def initialize_services():
     """
-    Инициализирует сервисы Google Sheets и Google Drive.
+    Инициализирует сервисы Google Sheets и Google Drive используя Streamlit Secrets.
     """
-    gcp_config = config.get('gcp_service_account', {})
-    google_api_config = config.get('google_api', {})
+    gcp_config = st.secrets["gcp_service_account"]
+    google_api_config = st.secrets["google_api"]
     scopes = [
         'https://www.googleapis.com/auth/spreadsheets',
         'https://www.googleapis.com/auth/drive'
@@ -53,29 +52,18 @@ def initialize_services(config):
 
     # Сборка словаря с учетными данными сервисного аккаунта
     service_account_info = {
-        "type": gcp_config.get("type"),
-        "project_id": gcp_config.get("project_id"),
-        "private_key_id": gcp_config.get("private_key_id"),
-        "private_key": gcp_config.get("private_key"),
-        "client_email": gcp_config.get("client_email"),
-        "client_id": gcp_config.get("client_id"),
-        "auth_uri": gcp_config.get("auth_uri"),
-        "token_uri": gcp_config.get("token_uri"),
-        "auth_provider_x509_cert_url": gcp_config.get("auth_provider_x509_cert_url"),
-        "client_x509_cert_url": gcp_config.get("client_x509_cert_url"),
-        "universe_domain": gcp_config.get("universe_domain")
+        "type": gcp_config["type"],
+        "project_id": gcp_config["project_id"],
+        "private_key_id": gcp_config["private_key_id"],
+        "private_key": gcp_config["private_key"],
+        "client_email": gcp_config["client_email"],
+        "client_id": gcp_config["client_id"],
+        "auth_uri": gcp_config["auth_uri"],
+        "token_uri": gcp_config["token_uri"],
+        "auth_provider_x509_cert_url": gcp_config["auth_provider_x509_cert_url"],
+        "client_x509_cert_url": gcp_config["client_x509_cert_url"],
+        "universe_domain": gcp_config["universe_domain"]
     }
-
-    # Проверка наличия всех необходимых полей
-    required_fields = [
-        "type", "project_id", "private_key_id", "private_key",
-        "client_email", "client_id", "auth_uri", "token_uri",
-        "auth_provider_x509_cert_url", "client_x509_cert_url",
-        "universe_domain"
-    ]
-    missing_fields = [field for field in required_fields if not service_account_info.get(field)]
-    if missing_fields:
-        raise ValueError(f"Отсутствуют обязательные поля в секции `gcp_service_account`: {', '.join(missing_fields)}")
 
     try:
         # Создание учетных данных
@@ -106,27 +94,16 @@ def initialize_services(config):
 
     return creds, gc, sheets_service, drive_service
 
-# =======================
-# Попытка загрузить конфигурацию и инициализировать сервисы
-# =======================
-
+# Попытка инициализировать сервисы
 try:
-    config = load_config()
-    # Для отладки (временно, уберите после проверки)
-    # st.write("Конфигурация загружена:", config)
-    creds, gc, sheets_service, drive_service = initialize_services(config)
+    creds, gc, sheets_service, drive_service = initialize_services()
 except Exception as e:
-    # Если возникла ошибка, отображаем её и останавливаем приложение
     st.error(f"Ошибка при загрузке конфигурации или инициализации сервисов: {e}")
     st.stop()
 
 # =======================
 # Streamlit App Layout
 # =======================
-
-# Отображение информации о сервисном аккаунте в боковой панели
-service_account_email = creds.service_account_email
-st.sidebar.info(f"Сервисный аккаунт: {service_account_email}")
 
 # Заголовок приложения
 st.title("Загрузка HTML Отчёта в Google Sheets и Drive")
@@ -147,10 +124,29 @@ if uploaded_file is not None:
         soup = BeautifulSoup(content, 'html.parser')
 
         # Извлечение информации о клиенте
-        client_name = soup.find_all('td', text=lambda x: x and 'Имя:' in x)[0].text.split('Имя: ')[1].strip()
-        age = soup.find_all('td', text=lambda x: x and 'Возраст:' in x)[0].text.split('Возраст: ')[1].strip()
-        body = soup.find_all('td', text=lambda x: x and 'Телосложение:' in x)[0].text.split('Телосложение: ')[1].strip()
-        test_time = soup.find_all('td', text=lambda x: x and 'Время тестирования:' in x)[0].text.split('Время тестирования: ')[1].strip()
+        client_name_element = soup.find('td', text=lambda x: x and 'Имя:' in x)
+        if client_name_element:
+            client_name = client_name_element.text.split('Имя: ')[1].strip()
+        else:
+            raise ValueError("Не удалось найти поле 'Имя' в HTML файле.")
+
+        age_element = soup.find('td', text=lambda x: x and 'Возраст:' in x)
+        if age_element:
+            age = age_element.text.split('Возраст: ')[1].strip()
+        else:
+            raise ValueError("Не удалось найти поле 'Возраст' в HTML файле.")
+
+        body_element = soup.find('td', text=lambda x: x and 'Телосложение:' in x)
+        if body_element:
+            body = body_element.text.split('Телосложение: ')[1].strip()
+        else:
+            raise ValueError("Не удалось найти поле 'Телосложение' в HTML файле.")
+
+        test_time_element = soup.find('td', text=lambda x: x and 'Время тестирования:' in x)
+        if test_time_element:
+            test_time = test_time_element.text.split('Время тестирования: ')[1].strip()
+        else:
+            raise ValueError("Не удалось найти поле 'Время тестирования' в HTML файле.")
 
         # Извлечение таблиц с 4 столбцами
         tables = []
@@ -198,27 +194,17 @@ if uploaded_file is not None:
         st.subheader("Извлечённые Данные")
         st.dataframe(result_df)
 
-        # Ввод URL Google Sheets
-        spreadsheet_url = st.text_input(
-            "Введите URL Google Sheets, куда хотите загрузить данные:",
-            value=config.get('google_api', {}).get('SPREADSHEET_URL', "")
-        )
-
-        # Ввод имени листа
-        worksheet_name = st.text_input(
-            "Введите имя листа в Google Sheets, куда хотите вставить данные:",
-            value="Вставка"  # Можно задать значение по умолчанию
-        )
-
-        # Ввод ID папки на Google Drive (опционально)
-        drive_folder_id = st.text_input(
-            "Введите ID папки на Google Drive, куда хотите загрузить PDF (опционально):",
-            value=config.get('google_api', {}).get('DRIVE_FOLDER_ID', "")
-        )
+        # Получение значений из Streamlit Secrets
+        spreadsheet_url = st.secrets["google_api"]["SPREADSHEET_URL"]
+        worksheet_name = "Вставка"  # Жестко заданное имя листа
+        drive_folder_id = st.secrets["google_api"]["DRIVE_FOLDER_ID"]
 
         # Кнопка для загрузки данных
         if st.button("Загрузить в Google Sheets и Drive"):
             try:
+                if not spreadsheet_url:
+                    raise ValueError("URL Google Sheets не указан в конфигурации.")
+
                 # Открытие таблицы по URL
                 spreadsheet = gc.open_by_url(spreadsheet_url)
 

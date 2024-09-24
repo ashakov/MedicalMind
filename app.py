@@ -111,7 +111,7 @@ st.title("Загрузка HTML Отчёта в Google Sheets и Drive")
 # Инструкции
 st.markdown("""
     Загрузите HTML отчёт, и это приложение извлечёт необходимые данные и добавит их в ваш документ Google Sheets.
-    После этого, приложение экспортирует определённый лист в PDF и загрузит его на ваш Google Диск.
+    После этого, приложение экспортирует определённые листы в PDF и загрузит их на ваш Google Диск.
 """)
 
 # Загрузка файла
@@ -196,8 +196,13 @@ if uploaded_file is not None:
 
         # Получение значений из Streamlit Secrets
         spreadsheet_url = st.secrets["google_api"]["SPREADSHEET_URL"]
-        worksheet_name = "Вставка"  # Жестко заданное имя листа
+        input_worksheet_name = "Вставка"  # Имя листа для вставки данных
         drive_folder_id = st.secrets["google_api"]["DRIVE_FOLDER_ID"]
+
+        # Добавляем выбор вкладок для экспорта в PDF
+        st.subheader("Выберите вкладки для экспорта в PDF")
+        export_express = st.checkbox("Экспресс", value=True)
+        export_na_ruki = st.checkbox("На руки", value=True)
 
         # Кнопка для загрузки данных
         if st.button("Загрузить в Google Sheets и Drive"):
@@ -208,12 +213,12 @@ if uploaded_file is not None:
                 # Открытие таблицы по URL
                 spreadsheet = gc.open_by_url(spreadsheet_url)
 
-                # Выбор листа
+                # Выбор листа для вставки данных
                 try:
-                    worksheet = spreadsheet.worksheet(worksheet_name)
+                    worksheet = spreadsheet.worksheet(input_worksheet_name)
                 except gspread.exceptions.WorksheetNotFound:
                     # Если лист не существует, создаём новый
-                    worksheet = spreadsheet.add_worksheet(title=worksheet_name, rows="1000", cols="20")
+                    worksheet = spreadsheet.add_worksheet(title=input_worksheet_name, rows="1000", cols="20")
 
                 # Запись DataFrame в Google Sheets
                 set_with_dataframe(worksheet, result_df)
@@ -224,10 +229,8 @@ if uploaded_file is not None:
                 # Генерация PDF
                 # =======================
 
-                # Получение идентификатора таблицы и листа
+                # Получение идентификатора таблицы
                 spreadsheet_id = spreadsheet.url.split('/d/')[1].split('/')[0]
-                sheet = spreadsheet.worksheet(worksheet_name)
-                sheet_id = sheet.id  # Это gid
 
                 # Формирование названия файла
                 try:
@@ -242,19 +245,17 @@ if uploaded_file is not None:
                 pdf_filename = f"Отчет_{client_last_name}_{client_first_name}_{order_number}.pdf"
 
                 # Формирование URL для экспорта PDF
-                export_url = (
-                    f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?"
-                    f"format=pdf&"
-                    f"gid={sheet_id}&"
-                    f"size=letter&"
-                    f"portrait=true&"
-                    f"fitw=true&"
-                    f"sheetnames=false&"
-                    f"printtitle=false&"
-                    f"pagenumbers=false&"
-                    f"gridlines=false&"
-                    f"fzr=false"
-                )
+                export_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=pdf"
+
+                # Добавление выбранных листов в URL
+                if export_express:
+                    express_sheet = spreadsheet.worksheet("Экспресс")
+                    export_url += f"&gid={express_sheet.id}"
+                if export_na_ruki:
+                    na_ruki_sheet = spreadsheet.worksheet("На руки")
+                    export_url += f"&gid={na_ruki_sheet.id}"
+
+                export_url += "&size=letter&portrait=true&fitw=true&sheetnames=false&printtitle=false&pagenumbers=false&gridlines=false&fzr=false"
 
                 # Обновление токена, если необходимо
                 if not creds.valid:
@@ -267,14 +268,14 @@ if uploaded_file is not None:
                 # Скачиваем PDF
                 response = requests.get(export_url, headers=headers)
                 if response.status_code != 200:
-                    st.error("Не удалось экспортировать лист в PDF.")
+                    st.error("Не удалось экспортировать листы в PDF.")
                     st.stop()
 
                 # Сохранение PDF файла
                 with open(pdf_filename, 'wb') as f:
                     f.write(response.content)
 
-                st.success(f"Лист успешно экспортирован в PDF: {pdf_filename}")
+                st.success(f"Выбранные листы успешно экспортированы в PDF: {pdf_filename}")
 
                 # =======================
                 # Загрузка PDF на Google Drive

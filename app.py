@@ -12,6 +12,8 @@ from IPython.display import display, clear_output
 import ipywidgets as widgets
 import json
 
+
+
 # Настройка аутентификации с Google API
 SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
 SERVICE_ACCOUNT_FILE = 'D:\Projects\MedicalMind\service_account.json'  # Укажите путь к вашему файлу сервисного аккаунта

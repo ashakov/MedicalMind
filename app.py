@@ -189,3 +189,4 @@ process_button.on_click(on_process_button_clicked)
 
 # Отображаем виджеты
 display(upload_button, process_button, output)
+

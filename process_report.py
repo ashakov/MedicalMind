@@ -40,7 +40,7 @@ def process_html_file(file_path):
 
         # Настройка аутентификации с Google API
         SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
-        SERVICE_ACCOUNT_FILE = 'D:\\Projects\\MedicalMind\\service_account.json'
+        SERVICE_ACCOUNT_FILE = 'service_account.json'
 
         credentials = Credentials.from_service_account_file(
             SERVICE_ACCOUNT_FILE, scopes=SCOPES)
